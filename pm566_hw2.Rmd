@@ -1,0 +1,249 @@
+---
+title: "PM566 Hw2"
+author: "Changqing Su"
+date: "2020/9/23"
+output: html_document
+---
+
+```{r,message=FALSE, echo=FALSE}
+library(data.table)
+library(leaflet)
+library(tidyverse)
+```
+
+
+
+## Data Wrangling  
+
+#### 1 
+
+```{r}
+indi <- data.table::fread("chs_individual.csv")
+regi <- data.table::fread("chs_regional.csv")
+
+chs1= merge(indi,regi, by= "townname")
+
+nrow(chs1)
+length(unique(chs1$sid))
+```
+There seems no duplicated rows after merging the data.
+
+
+#### 2 
+
+```{r}
+chs1$obesity_level = ifelse(chs1$bmi<14,"underweight", 
+                            ifelse(chs1$bmi>=14 & chs1$bmi<22, "normal",
+                                   ifelse(chs1$bmi>=22 & chs1$bmi<24,"Overweight", 
+                                          ifelse(chs1$bmi>=24,"obese",NA))
+                                   )
+                            )
+a1=table(chs1$obesity_level)
+a2=tapply(chs1$bmi, chs1$obesity_level, min)
+a3=tapply(chs1$bmi, chs1$obesity_level, max)
+a4=rbind(a1,a2,a3)
+row.names(a4)=c("observation","bmi_min","bmi_max")
+a4
+```
+
+#### 3
+
+```{r}
+chs1$smoke_gas_exposure=ifelse(chs1$smoke  == 1 & chs1$gasstove == 0, "secondhand_only",
+                               ifelse(chs1$smoke ==0 & chs1$gasstove ==1, "gasstove_only",
+                                      ifelse(chs1$smoke ==0 & chs1$gasstove ==0, "no_secondhand_or_gasstove", 
+                                             ifelse(chs1$smoke ==1 & chs1$gasstove ==1,"both_secondhand_and_gasstove",NA)
+                                             )
+                               )
+)
+table(chs1$smoke_gas_exposure)                                          
+```
+
+#### 4
+
+```{r}
+#replace the NA values with mean for fev
+
+for (i in 1:nrow(chs1))
+  {
+  if (is.na(chs1$fev[i])==T)
+    {
+    a=chs1$male[i]
+    b=chs1$hispanic[i]
+    chs1$fev[i]=mean(chs1$fev[which(chs1$male==a & chs1$hispanic==b)],na.rm = T)
+  }
+  
+
+#check if it works
+chs1$fev[which(is.na(chs1$fev)==T)]
+
+#replace the NA values with mean for asthma
+}
+for (i in 1:nrow(chs1))
+  {
+  if (is.na(chs1$asthma[i])==T)
+    {
+    a=chs1$male[i]
+    b=chs1$hispanic[i]
+    chs1$asthma[i]=mean(chs1$asthma[which(chs1$male==a & chs1$hispanic==b)],na.rm = T)
+  }
+  
+
+}
+
+#check if it works
+chs1$asthma[which(is.na(chs1$asthma)==T)]
+
+
+#construct table for townname
+
+t1=rbind(tapply(chs1$fev, chs1$townname,mean),
+      tapply(chs1$fev, chs1$townname,sd),
+      tapply(chs1$asthma, chs1$townname,mean),
+      tapply(chs1$asthma, chs1$townname,sd)
+)
+row.names(t1)= c("fev mean","fev sd","asthma mean", "asthma sd")
+t1
+
+#construct table for sex
+
+t2=rbind(tapply(chs1$fev, chs1$male,mean),
+      tapply(chs1$fev, chs1$male,sd),
+      tapply(chs1$asthma, chs1$male,mean),
+      tapply(chs1$asthma, chs1$male,sd)
+)
+row.names(t2)= c("fev mean","fev sd","asthma mean", "asthma sd")
+colnames(t2)=c("female","male")
+t2
+
+#construct table for obesity_level
+
+t3=rbind(tapply(chs1$fev, chs1$obesity_level,mean),
+      tapply(chs1$fev, chs1$obesity_level,sd),
+      tapply(chs1$asthma, chs1$obesity_level,mean),
+      tapply(chs1$asthma, chs1$obesity_level,sd)
+)
+row.names(t3)= c("fev mean","fev sd","asthma mean", "asthma sd")
+t3
+
+#construct table for smoke_gas_exposure
+
+t4=rbind(tapply(chs1$fev, chs1$smoke_gas_exposure,mean),
+      tapply(chs1$fev, chs1$smoke_gas_exposure,sd),
+      tapply(chs1$asthma, chs1$smoke_gas_exposure,mean),
+      tapply(chs1$asthma, chs1$smoke_gas_exposure,sd)
+)
+row.names(t4)= c("fev mean","fev sd","asthma mean", "asthma sd")
+t4
+
+
+```
+
+
+
+
+
+
+## Looking at the Data (EDA)   
+
+
+#### 1
+
+```{r}
+
+chs1 %>%
+  filter(!(bmi %in% NA))  %>%
+  ggplot(mapping = aes(x=bmi,y=fev,color=townname))+
+  geom_point()+
+  stat_smooth(method=lm)
+
+
+```
+
+The plot shows that there may exist positive relationship between bmi and fev.
+
+#### 2
+
+```{r}
+chs1 %>%
+  filter(!(obesity_level %in% NA))  %>%
+  ggplot()+
+  geom_histogram(mapping = aes(x=fev,fill=obesity_level))+
+  scale_fill_brewer(palette = 'PuOr')
+
+
+
+chs1 %>%
+  filter(!(smoke_gas_exposure %in% NA))  %>%
+  ggplot()+
+  geom_histogram(mapping = aes(x=fev,fill=smoke_gas_exposure))+
+  scale_fill_brewer(palette = 'PuOr')
+
+```
+
+The plot shows that the fev is normally distributed. Smoke/gas exposure are not associated with fev.
+
+#### 3
+
+```{r}
+
+
+chs1 %>%
+  filter(!(smoke_gas_exposure %in% NA))  %>%
+  ggplot()+
+  geom_bar(mapping = aes(x=obesity_level,fill=smoke_gas_exposure))+
+  scale_fill_brewer(palette = 'PuOr')+
+  labs(tilte='Barchart of BMI by smoke/gas exposure')+
+  theme_bw()
+```
+
+Here, most people  have gas stove in their residences only.
+
+#### 4 
+
+```{r}
+
+chs1 %>%
+  filter(!(obesity_level %in% NA))  %>%
+  ggplot(mapping = aes(x=obesity_level,y=fev))+
+  stat_summary(fun.data = 'mean_sdl')
+
+
+
+chs1 %>%
+  filter(!(smoke_gas_exposure %in% NA))  %>%
+  ggplot(mapping = aes(x=smoke_gas_exposure,y=fev))+
+  stat_summary(fun.data = 'mean_sdl')
+```
+
+Here, we can see that people with higher bmi level may have higher fev value.  
+But smoke/gas exposure seems to have no significant association with fev.
+#### 5
+
+```{r}
+
+  comm_cat=colorNumeric(c('green','yellow','red'),domain = chs1$pm25_mass)
+
+  chs1 %>%
+  filter(!(pm25_mass %in% NA))  %>%
+  leaflet()  %>%
+  addProviderTiles('OpenStreetMap') %>%
+  addCircles(lat=~lat,lng = ~lon, color = ~comm_cat(pm25_mass), opacity = 1, fillOpacity = 1, radius =100) %>%
+  addLegend('bottomleft', pal=comm_cat, values = chs1$pm25_mass, title ='PM2.5 Mass', opacity= 1)
+```
+
+Here, we can see that Riverside community has the greatest PM2.5 Mass.
+
+
+#### 6
+
+
+```{r}
+chs1 %>%
+  filter(!(fev %in% NA))  %>%
+  ggplot(mapping = aes(x=pm25_mass,y=fev))+
+  stat_summary(fun.data = 'mean_sdl')
+
+```
+
+Here, the statistical summary plot shows that PM2.5 mass has no significant association with FEV.
