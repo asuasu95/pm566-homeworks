@@ -1,0 +1,188 @@
+---
+title: "hw3"
+author: "Changqing Su"
+date: "2020/10/14"
+always_allow_html: true
+output: github_document
+---
+
+```{r, message=FALSE,warning=FALSE}
+library(httr)
+library(xml2)
+library(stringr)
+library(tidytext)
+library(tidyverse)
+library(ggplot2)
+library(readr)
+library(dplyr)
+library(data.table)
+```
+## APIs
+
+
+```{r}
+# Downloading the website
+website <- xml2::read_html("https://pubmed.ncbi.nlm.nih.gov/?term=sars-cov-2+trial+vaccine")
+
+# Finding the counts
+counts <- xml2::xml_find_first(website, "/html/body/main/div[9]/div[2]/div[2]/div[1]/span")
+
+# Turning it into text
+counts <- as.character(counts)
+
+# Extracting the data using regex
+stringr::str_extract(counts, "[0-9,]+")
+```
+So there are 564 results.
+
+
+```{r}
+query_ids <- GET(
+  url   = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+  query = list(
+ db="pubmed",
+ term="sars-cov-2 trial vaccine",
+ retmax=1000
+)
+)
+
+# Extracting the content of the response of GET
+ids <- httr::content(query_ids)
+
+# Turn the result into a character vector
+ids <- as.character(ids)
+
+
+# Find all the ids 
+ids <- stringr::str_extract_all(ids, "<Id>[0-9]+</Id>")[[1]]
+
+
+# Remove all the leading and trailing <Id> </Id>. Make use of "|"
+ids <- stringr::str_remove_all(ids, "<Id>|</Id>")
+
+```
+
+
+
+```{r}
+publications <- GET(
+  url   = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+  query = list(
+   db='pubmed',
+   id=paste(ids,collapse = ","),
+   retmax=1000,
+   rettype="abstract"
+    )
+)
+publications <- httr::content(publications)
+publications_txt <- as.character(publications)
+```
+
+
+```{r one-string-per-response}
+pub_char_list <- xml2::xml_children(publications)
+pub_char_list <- sapply(pub_char_list, as.character)
+```
+
+Get abstract of the paper: 
+```{r extracting-last-bit}
+abstracts <- str_extract(pub_char_list, "<Abstract>(\\n|.)+</Abstract>")
+abstracts <- str_remove_all(abstracts, "</?[[:alnum:]]+>")
+abstracts <- str_replace_all(abstracts, "\\s+"," ")
+```
+
+Get name of the journal where it was published:
+```{r journal-titles}
+
+jtitles <- str_extract(pub_char_list, "<Title>(\\n|.)+</Title>")
+jtitles <- str_remove_all(jtitles, "</?[[:alnum:]]+>")
+jtitles <- str_replace_all(jtitles, "\\s+"," ")
+```
+
+Get title of the paper:
+```{r artile-titles}
+
+atitles <- str_extract(pub_char_list, "<ArticleTitle>(\\n|.)+</ArticleTitle>")
+
+atitles <- str_remove_all(atitles, "</?[[:alnum:]]+>")
+atitles <- str_replace_all(atitles, "\\s+"," ")
+```
+
+Get publication date:
+```{r pub-date}
+pubdate <- str_extract(pub_char_list, "<PubDate>(\\n|.)+</PubDate>")
+pubdate <- str_remove_all(pubdate, "</?[[:alnum:]]+>")
+pubdate <- str_replace_all(pubdate, "\\s+"," ")
+
+```
+
+
+
+```{r build-db}
+database <- data.frame(
+  PubMedID=ids,
+  PaperTitle=atitles,
+  JournalNames=jtitles,
+  PublicationDate=pubdate,
+  abstracts=abstracts
+)
+knitr::kable(head(database))
+```
+
+
+
+## Test mining
+
+#### Ques 1:
+
+```{r}
+pubmed=read_csv("https://raw.githubusercontent.com/USCbiostats/data-science-data/master/03_pubmed/pubmed.csv")
+
+
+pubmed %>%
+  unnest_tokens(output=token, input=abstract) %>%
+  count(token, sort = T) %>%
+  top_n(n=50, wt=n) 
+```
+The top most frequent words are all stopwords, so we need to remove those.
+
+```{r}
+  token_pub=unnest_tokens(pubmed,output=token, input=abstract) %>%
+  anti_join(stop_words, by= c("token"="word")) %>%
+  filter(! (token %in% as.character(seq(0,100, by=1)))) 
+  count_token=count(token_pub,token, sort = T, by=term) 
+  count_token=data.table(count_token, key="by")
+  knitr::kable(count_token[, head(.SD, 5), by=by])
+```
+The 5 most common tokens for each search term were shown above.
+
+#### Ques 2:
+
+```{r}
+pubmed %>%
+  unnest_ngrams(output=token, input=abstract, n=2) %>%
+  count(token, sort = T) %>%
+  top_n(n=10, wt=n) %>%
+  ggplot(aes(x=n,y=fct_reorder(token,n))) + 
+  geom_col()
+
+```
+
+#### Ques 3:
+
+```{r}
+tfidf= pubmed %>%
+  unnest_tokens(abstract, abstract) %>%
+  count(abstract, term) %>%
+  bind_tf_idf(abstract, term, n) %>%
+  arrange(desc(tf_idf))
+tfidf=data.table(tfidf, key= "term")
+ knitr::kable(tfidf[, head(.SD, 5),.SDcols = c("abstract","tf_idf"), by=term])
+```
+The 5 tokens from each search term with the highest TF-IDF value are shown above.
+However, the results are very different from the results in question 1. Only a few tokens appear in both results.
+
+
+
+
+
